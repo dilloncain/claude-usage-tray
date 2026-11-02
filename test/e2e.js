@@ -28,7 +28,8 @@ function handler(req) {
   if (url.hostname !== 'claude.ai') return html(404, 'nope');
   if (url.pathname.startsWith('/api/')) {
     // Direct requests (no page) get the browser check when challenge mode is on.
-    if (mock.challenge && !req.headers.get('x-from-page')) return html(403, '<html>Just a moment...</html>');
+    const fromPage = !!(req.headers.get('referer') || req.referrer);
+    if (mock.challenge && !fromPage) return html(403, '<html>Just a moment...</html>');
     if (!mock.signedIn) return json(403, { type: 'error', error: { type: 'permission_error' } });
     if (url.pathname === '/api/organizations') return json(200, [{ uuid: 'org-1', name: 'Me', capabilities: ['chat', 'claude_max'], rate_limit_tier: 'default_claude_max_5x' }]);
     if (url.pathname === '/api/organizations/org-1/usage') {
@@ -41,9 +42,7 @@ function handler(req) {
     return json(404, {});
   }
   // Pages: tag fetches made from inside a page so the mock can tell them apart.
-  return html(200, `<!doctype html><title>claude mock</title><script>
-    const f = window.fetch; window.fetch = (u, o = {}) => f(u, { ...o, headers: { ...(o.headers || {}), 'x-from-page': '1' } });
-  </script><a id="ext" href="https://evil.example/">x</a>`);
+  return html(200, `<!doctype html><title>claude mock</title><a id="ext" href="https://evil.example/">x</a>`);
 }
 
 app.whenReady().then(() => {
@@ -90,11 +89,24 @@ app.whenReady().then(async () => {
     check('widget cannot navigate away', /widget\.html/.test(widget.webContents.getURL()));
     check('widget has no Node access', await widget.webContents.executeJavaScript(`typeof require === 'undefined' && typeof process === 'undefined'`));
 
+    // Plant a Google cookie as if the person used Google sign-in.
+    await session.fromPartition('persist:claude').cookies.set({ url: 'https://accounts.google.com/', name: 'SID', value: 'secret', expirationDate: Date.now() / 1000 + 3600 });
+    await session.fromPartition('persist:claude').cookies.set({ url: 'https://claude.ai/', name: 'sessionKey', value: 'k', expirationDate: Date.now() / 1000 + 3600 });
+
+    // Pop-up flood is rate-limited.
+    opened.length = 0;
+    await login.webContents.executeJavaScript(`for (let i = 0; i < 20; i++) window.open('https://evil.example/' + i)`).catch(() => {});
+    await sleep(500);
+    check('pop-up flood is rate-limited', opened.length <= 1, String(opened.length));
+
     // 4. Sign in -> login closes, data appears.
     mock.signedIn = true;
     check('sign-in window closes after sign-in', await until(() => !findWin(/claude\.ai\/login/)));
     check('usage shows in widget', await until(async () => /Current session[\s\S]*50%[\s\S]*Weekly · all models[\s\S]*12%/.test(await widgetText())), (await widgetText()).replace(/\s+/g, ' ').slice(0, 120));
     check('plan badge shown', /Max 5x/.test(await widgetText()));
+    const cookies = await session.fromPartition('persist:claude').cookies.get({});
+    check('Google cookies removed after sign-in', !cookies.some(c => /google/.test(c.domain)), cookies.map(c => c.domain).join(','));
+    check('claude.ai cookie kept', cookies.some(c => c.name === 'sessionKey'));
     check('null bucket (Opus) hidden', !/Opus/.test(await widgetText()));
 
     // 5. Alerts: crossing 80% fires once.
@@ -111,7 +123,15 @@ app.whenReady().then(async () => {
     mock.usagePct = 61;
     widget.webContents.executeJavaScript(`document.getElementById('refresh').click()`);
     check('falls back to hidden page on browser check', await until(async () => /61%/.test(await widgetText()), 20000));
-    check('hidden page is not visible', wins().filter(w => /settings\/usage/.test(w.webContents.getURL())).every(w => !w.isVisible()));
+    const hidden = wins().find(w => /settings\/usage/.test(w.webContents.getURL()));
+    check('hidden page is not visible', !!hidden && !hidden.isVisible());
+    if (hidden) {
+      opened.length = 0;
+      const before = wins().length;
+      await hidden.webContents.executeJavaScript(`window.open('https://accounts.google.com/x'); location.href='https://evil.example/'`).catch(() => {});
+      await sleep(800);
+      check('hidden page cannot open windows, navigate, or launch the browser', wins().length === before && opened.length === 0 && /claude\.ai/.test(hidden.webContents.getURL()));
+    }
 
     // 7. Signed out remotely -> widget flips to sign-in.
     mock.challenge = false;

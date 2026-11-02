@@ -122,3 +122,31 @@ test('makeIco: valid ICO header and directory', () => {
     assert.equal(ico.readUInt32LE(off), 40); // BITMAPINFOHEADER
   }
 });
+
+test('isSignInUrl: exact hosts only, https, default port, no userinfo', () => {
+  const ok = ['https://claude.ai/login', 'https://accounts.google.com/o/oauth2/auth?x=1', 'https://appleid.apple.com/auth'];
+  const bad = [
+    'http://claude.ai/', 'https://claude.ai:8443/', 'https://claude.ai.evil.com/', 'https://evilclaude.ai/',
+    'https://claude.ai@evil.com/', 'https://user:pw@claude.ai/', 'https://sites.google.com/view/x',
+    'https://script.google.com/x', 'https://foo.googleusercontent.com/', 'https://www.apple.com/',
+    'https://docs.anthropic.com/', 'javascript:alert(1)', 'file:///C:/x', 'ms-msdt:/id', 'not a url', '',
+  ];
+  for (const u of ok) assert.ok(lib.isSignInUrl(u), u);
+  for (const u of bad) assert.ok(!lib.isSignInUrl(u), u);
+});
+
+test('isClaudeCookieDomain', () => {
+  for (const d of ['claude.ai', '.claude.ai', 'api.claude.ai']) assert.ok(lib.isClaudeCookieDomain(d), d);
+  for (const d of ['.google.com', 'accounts.google.com', 'evilclaude.ai', 'claude.ai.evil.com', '', null]) assert.ok(!lib.isClaudeCookieDomain(d), String(d));
+});
+
+test('normalizeUsage / updatePace ignore prototype-polluting keys', () => {
+  const payload = JSON.parse('{"__proto__":{"utilization":50},"constructor":{"utilization":50},"prototype":{"utilization":5},' +
+    '"five_hour":{"utilization":10},"limits":[{"kind":"__proto__","percent":9}]}');
+  const { buckets } = lib.normalizeUsage(payload);
+  assert.deepEqual(buckets.map(b => b.key), ['five_hour']);
+  assert.ok(buckets.every(b => typeof b.label === 'string'));
+  const samples = Object.create(null);
+  lib.updatePace(samples, buckets);
+  assert.equal(Object.getPrototypeOf({}).utilization, undefined);
+});

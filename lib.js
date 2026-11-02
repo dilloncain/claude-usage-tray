@@ -30,7 +30,7 @@ function planLabel(org) {
 // ---------------------------------------------------------------- usage
 // Known bucket names -> friendly labels. Anything the API adds later is still
 // shown, with a label made from its key.
-const LABELS = {
+const LABELS = Object.assign(Object.create(null), {
   five_hour: 'Current session',
   seven_day: 'Weekly · all models',
   seven_day_opus: 'Weekly · Opus',
@@ -38,7 +38,9 @@ const LABELS = {
   seven_day_fable: 'Weekly · Fable',
   seven_day_oauth_apps: 'Weekly · connected apps',
   seven_day_omelette: 'Weekly · Claude Design',
-};
+});
+// Keys that must never be used as plain-object property names.
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const ORDER = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_fable'];
 
 function titleCase(s) { return s.replace(/(^|\s|· )([a-z])/g, (m, a, b) => a + b.toUpperCase()); }
@@ -56,25 +58,27 @@ function normalizeUsage(usage) {
   const buckets = [];
   const seen = new Set();
   for (const [key, b] of Object.entries(usage || {})) {
+    if (UNSAFE_KEYS.has(key)) continue;
     if (!b || typeof b !== 'object' || Array.isArray(b)) continue;
     if (!('utilization' in b)) continue;
     const pct = Number(b.utilization);
     if (b.utilization == null || !Number.isFinite(pct)) continue; // null = not on this plan
-    buckets.push({ key, label: LABELS[key] || humanize(key), percent: clampPct(pct), resetsAt: parseTime(b.resets_at) });
+    buckets.push({ key, label: typeof LABELS[key] === 'string' ? LABELS[key] : humanize(key), percent: clampPct(pct), resetsAt: parseTime(b.resets_at) });
     seen.add(key);
   }
   // Newer accounts may also get a generic "limits" array.
   if (Array.isArray(usage && usage.limits)) {
     for (const l of usage.limits) {
       if (!l || typeof l !== 'object') continue;
-      const key = [l.kind, l.group, l.scope].filter(Boolean).join('_') || 'limit';
+      const key = [l.kind, l.group, l.scope].filter(Boolean).map(String).join('_') || 'limit';
+      if (UNSAFE_KEYS.has(key)) continue;
       const pct = Number(l.percent);
       if (seen.has(key) || l.percent == null || !Number.isFinite(pct)) continue;
       const kind = String(l.kind || '');
       const prefix = /week|seven/i.test(kind) ? 'Weekly · ' : /session|five/i.test(kind) ? 'Session · ' : '';
       buckets.push({
         key,
-        label: LABELS[key] || prefix + titleCase(String(l.group || kind || key).replace(/_/g, ' ')),
+        label: typeof LABELS[key] === 'string' ? LABELS[key] : prefix + titleCase(String(l.group || kind || key).replace(/_/g, ' ')),
         percent: clampPct(pct),
         resetsAt: parseTime(l.resets_at),
       });
@@ -106,7 +110,7 @@ const windowKey = (b) => `${b.key}|${b.resetsAt ? Math.round(b.resetsAt / 60000)
 // this window. Needs ~10 minutes of readings. Returns ms, or null when it
 // won't fill before it resets.
 function updatePace(samples, buckets, now = Date.now()) {
-  const out = {};
+  const out = Object.create(null);
   const live = new Set(buckets.map(b => b.key));
   for (const k of Object.keys(samples)) if (!live.has(k)) delete samples[k];
   for (const b of buckets) {
@@ -248,7 +252,26 @@ function makeIco(pct = 35, style = 'ring', sizes = [16, 24, 32, 48, 64, 128, 256
   return Buffer.concat([head, ...dir, ...imgs]);
 }
 
+// Exact sign-in hosts (no wildcards: Google/Apple/Anthropic also host
+// user-made pages on other subdomains). https only, default port only.
+const SIGNIN_HOSTS = new Set([
+  'claude.ai',
+  'accounts.google.com', 'accounts.youtube.com', // Google sign-in (sets cookies via youtube during login)
+  'appleid.apple.com', 'idmsa.apple.com',       // Sign in with Apple
+]);
+function isSignInUrl(u) {
+  try {
+    const x = new URL(u);
+    return x.protocol === 'https:' && x.port === '' && x.username === '' && x.password === '' && SIGNIN_HOSTS.has(x.hostname);
+  } catch { return false; }
+}
+const isClaudeCookieDomain = (domain) => {
+  const d = String(domain || '').replace(/^\./, '').toLowerCase();
+  return d === 'claude.ai' || d.endsWith('.claude.ai');
+};
+
 module.exports = {
+  isSignInUrl, isClaudeCookieDomain, SIGNIN_HOSTS,
   orgIdOf, pickOrg, planLabel, normalizeUsage, sameWindow, windowKey, updatePace,
   formatCountdown, formatReset, levelColor, makeIcon, makeIco,
 };

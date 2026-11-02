@@ -25,10 +25,6 @@ const REQUEST_TIMEOUT_MS = 20000;
 const DEMO = process.env.CLAUDE_USAGE_DEMO === '1';
 const AUTOSTART_ARG = '--autostart';
 
-// Sites the sign-in window may show: claude.ai plus the identity providers its
-// "Continue with Google / Apple" buttons use. Everything else opens in the
-// person's real browser, and only if it's a plain http(s) link.
-const SIGNIN_HOSTS = /^(?:[a-z0-9-]+\.)*(?:claude\.ai|anthropic\.com|google\.com|gstatic\.com|googleusercontent\.com|apple\.com)$/i;
 
 // Chromium's UA minus "Electron/x" so Google's sign-in doesn't refuse the window.
 const browserUA = () => session.defaultSession.getUserAgent().replace(/\s(?:Electron|claude-usage-tray)\/\S+/gi, '');
@@ -105,7 +101,7 @@ let polling = false;
 let pollQueued = false;
 let pageMode = false;         // currently using the hidden page instead of direct requests
 let pageModePolls = 0;
-const samples = {};           // pace history per bucket
+const samples = Object.create(null); // pace history per bucket
 
 const state = {
   status: 'loading',          // 'loading' | 'ok' | 'signed-out' | 'error'
@@ -116,6 +112,7 @@ const state = {
   updatedAt: null,
   pace: {},                   // bucket key -> ms until 100% at the current rate, or null
 };
+const LOCKED_PREFS = () => ({ partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, devTools: !app.isPackaged, spellcheck: false });
 
 // ---------------------------------------------------------------- fetching
 const claudeSession = () => session.fromPartition(PARTITION);
@@ -158,7 +155,7 @@ function ensureFetchWin() {
   if (fetchWin && !fetchWin.isDestroyed()) return fetchWinReady;
   fetchWin = new BrowserWindow({
     show: false,
-    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
+    webPreferences: LOCKED_PREFS(),
   });
   fetchWin.webContents.setAudioMuted(true);
   fetchWin.on('closed', () => { fetchWin = null; fetchWinReady = null; });
@@ -182,11 +179,13 @@ async function pageFetchJson(url) {
   if (!win.webContents.getURL().startsWith(`${ORIGIN}/`)) throw new HttpError(599, false);
   // The URL is passed through JSON.stringify, so nothing from the network is
   // ever interpolated into the script.
-  const result = await withTimeout(win.webContents.executeJavaScript(`
+  // Runs in an isolated world (page scripts can't swap out fetch) and without
+  // a simulated user gesture (so the page gets no pop-up privileges).
+  const result = await withTimeout(win.webContents.executeJavaScriptInIsolatedWorld(1000, [{ code: `
     fetch(${JSON.stringify(url)}, { credentials: 'include', headers: { Accept: 'application/json' } })
       .then(async r => ({ status: r.status, type: r.headers.get('content-type') || '', body: await r.text() }))
       .catch(e => ({ status: 0, type: '', body: String(e) }))
-  `, true));
+  ` }], false));
   const isJson = String(result && result.type).includes('json');
   if (!result || result.status < 200 || result.status >= 300) throw new HttpError(result ? result.status : 0, isJson);
   if (!isJson) throw new HttpError(599, false);
@@ -431,9 +430,11 @@ function buildMenu() {
       ],
     },
     { type: 'separator' },
-    state.status === 'ok' && !DEMO
-      ? { label: 'Sign out of Claude', click: signOut }
-      : { label: 'Sign in to Claude…', click: openLogin },
+    ...(DEMO ? [] : state.status === 'signed-out'
+      ? [{ label: 'Sign in to Claude…', click: openLogin }]
+      : state.status === 'ok'
+        ? [{ label: 'Sign out of Claude', click: signOut }]
+        : [{ label: 'Sign in to Claude…', click: openLogin }, { label: 'Sign out of Claude', click: signOut }]),
     { label: 'Quit', click: () => { quitting = true; app.quit(); } },
   ]);
 }
@@ -450,7 +451,9 @@ function render(menuChanged = false) {
     const menuKey = `${state.status}|${widget && widget.isVisible()}`;
     if (menuChanged || menuKey !== lastTray.menuKey) { tray.setContextMenu(buildMenu()); lastTray.menuKey = menuKey; }
   }
-  if (widget && !widget.isDestroyed()) widget.webContents.send('state', state);
+  if (widget && !widget.isDestroyed()) {
+    try { widget.webContents.send('state', state); } catch { /* never let a bad value stop polling */ }
+  }
 }
 
 // ---------------------------------------------------------------- widget
@@ -537,7 +540,7 @@ function openLogin() {
   if (loginWin && !loginWin.isDestroyed()) { loginWin.show(); loginWin.focus(); return; }
   loginWin = new BrowserWindow({
     width: 480, height: 720, title: 'Sign in to Claude', icon: appIcon(), autoHideMenuBar: true,
-    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
+    webPreferences: LOCKED_PREFS(),
   });
   loginWin.loadURL(`${ORIGIN}/login`);
 
@@ -556,7 +559,8 @@ function openLogin() {
       orgId = null;
       pageMode = false;
       destroyFetchWin();
-      if (loginWin && !loginWin.isDestroyed()) loginWin.close();
+      closeAuthWindows();
+      await dropNonClaudeCookies();
       poll();
       showWidget();
     } catch { /* not signed in yet */ }
@@ -565,35 +569,65 @@ function openLogin() {
   loginWin.on('closed', () => { clearInterval(check); loginWin = null; });
 }
 
+// Close the sign-in window and any Google/Apple pop-ups.
+function closeAuthWindows() {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w !== widget && w !== fetchWin && !w.isDestroyed()) w.destroy();
+  }
+}
+
+// After signing in with Google or Apple, their account cookies would otherwise
+// stay in this app's profile. Keep only claude.ai's own session.
+async function dropNonClaudeCookies() {
+  const ses = claudeSession();
+  try {
+    for (const c of await ses.cookies.get({})) {
+      if (lib.isClaudeCookieDomain(c.domain)) continue;
+      const host = c.domain.replace(/^\./, '');
+      await ses.cookies.remove(`https://${host}${c.path || '/'}`, c.name).catch(() => {});
+    }
+    await ses.cookies.flushStore();
+  } catch { /* best effort */ }
+}
+
 async function signOut() {
   generation++;
+  closeAuthWindows();
   orgId = null;
   pageMode = false;
   destroyFetchWin();
   for (const k of Object.keys(samples)) delete samples[k];
+  // Wipe everything this app stored. (To end the session on claude.ai's side
+  // as well, use "Log out of all devices" in claude.ai settings.)
   await claudeSession().clearStorageData();
   await claudeSession().clearCache();
+  await claudeSession().clearAuthCache();
   Object.assign(state, { status: 'signed-out', buckets: [], extra: null, plan: null, error: null, pace: {} });
   render(true);
 }
 
 // ---------------------------------------------------------------- security
 // Applies to every window and pop-up the app ever creates.
-function isSignInUrl(u) {
-  try { const url = new URL(u); return url.protocol === 'https:' && SIGNIN_HOSTS.test(url.hostname); }
-  catch { return false; }
-}
-// Only plain web links ever leave the app, never file:, ms-*, or other handlers.
+const isSignInUrl = lib.isSignInUrl;
+// Only plain web links ever leave the app (never file:, ms-*, or other
+// handlers), and at most one every 2 seconds so a page can't flood the browser.
+let lastExternal = 0;
 function openExternalSafe(u) {
-  try { const url = new URL(u); if (url.protocol === 'https:' || url.protocol === 'http:') shell.openExternal(url.href); }
-  catch { /* ignore malformed */ }
+  if (Date.now() - lastExternal < 2000) return;
+  try {
+    const url = new URL(u);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+    lastExternal = Date.now();
+    shell.openExternal(url.href);
+  } catch { /* ignore malformed */ }
 }
 
 function hardenSession(ses) {
   ses.setUserAgent(browserUA());
   // claude.ai doesn't need the camera, mic, location, notifications, etc. here.
-  ses.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'clipboard-sanitized-write'));
-  ses.setPermissionCheckHandler((_wc, permission) => permission === 'clipboard-sanitized-write');
+  const fromClaude = (u) => { try { return new URL(u).origin === ORIGIN; } catch { return false; } };
+  ses.setPermissionRequestHandler((_wc, permission, cb, details) => cb(permission === 'clipboard-sanitized-write' && fromClaude(details && details.requestingUrl)));
+  ses.setPermissionCheckHandler((_wc, permission, origin) => permission === 'clipboard-sanitized-write' && fromClaude(origin));
   ses.setDevicePermissionHandler(() => false);
   // Nothing is ever downloaded through the app.
   ses.on('will-download', (e) => e.preventDefault());
@@ -601,12 +635,18 @@ function hardenSession(ses) {
 
 app.on('web-contents-created', (_e, wc) => {
   const isWidget = () => widget && !widget.isDestroyed() && wc === widget.webContents;
+  // The hidden data page never navigates elsewhere, opens pop-ups, or opens the browser.
+  const isFetch = () => fetchWin && !fetchWin.isDestroyed() && wc === fetchWin.webContents;
+  wc.on('select-bluetooth-device', (e, _list, cb) => { e.preventDefault(); cb(''); });
+  wc.on('select-hid-device', (e, _d, cb) => { e.preventDefault(); cb(''); });
+  wc.on('select-serial-port', (e, _l, _w, cb) => { e.preventDefault(); cb(''); });
+  wc.on('select-usb-device', (e, _d, cb) => { e.preventDefault(); cb(''); });
   // The widget never navigates (e.g. a dropped file or link). Other windows
   // may only move between claude.ai and its sign-in providers.
   const guard = (e, url) => {
     if (isWidget() || !isSignInUrl(url)) {
       e.preventDefault();
-      if (!isWidget()) openExternalSafe(url);
+      if (!isWidget() && !isFetch()) openExternalSafe(url);
     }
   };
   wc.on('will-navigate', guard);
@@ -615,16 +655,14 @@ app.on('web-contents-created', (_e, wc) => {
   // Pop-ups: only the sign-in flow may open one (Google/Apple), and it gets the
   // same locked-down settings. Everything else goes to the real browser.
   wc.setWindowOpenHandler(({ url }) => {
+    if (isFetch()) return { action: 'deny' };
     if (!isWidget() && isSignInUrl(url)) {
       return {
         action: 'allow',
-        overrideBrowserWindowOptions: {
-          autoHideMenuBar: true, icon: appIcon(),
-          webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
-        },
+        overrideBrowserWindowOptions: { autoHideMenuBar: true, icon: appIcon(), webPreferences: LOCKED_PREFS() },
       };
     }
-    openExternalSafe(url);
+    if (!isWidget()) openExternalSafe(url);
     return { action: 'deny' };
   });
 });
@@ -660,6 +698,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWidget);
 
   app.whenReady().then(() => {
+    // No app menu: removes Electron's default Reload / DevTools shortcuts.
+    Menu.setApplicationMenu(null);
     loadSettings();
     hardenSession(claudeSession());
     hardenSession(session.defaultSession);

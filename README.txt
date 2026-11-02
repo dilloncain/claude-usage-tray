@@ -1,4 +1,4 @@
-CLAUDE USAGE TRAY  —  v1.0.0
+CLAUDE USAGE TRAY  -  v1.0.0
 ============================
 
 Shows how much of your Claude plan you've used: the 5-hour session limit,
@@ -54,11 +54,17 @@ PRIVACY
 -------
 - You sign in on claude.ai's own page inside the app. The app never sees or
   stores your password.
-- Your sign-in stays on your PC, in the app's own browser storage:
-  %APPDATA%\Claude Usage Tray
+- Your sign-in stays on your PC, in the app's own storage (encrypted by
+  Windows):  %APPDATA%\Claude Usage Tray
+- If you sign in with Google or Apple, the app throws away their cookies
+  right after, and keeps only your claude.ai session.
+- The sign-in window can only show claude.ai and the official Google/Apple
+  sign-in pages. Other links open in your normal browser.
 - The app only talks to claude.ai, and only reads the same usage numbers the
   claude.ai Settings > Usage page shows. No analytics, nothing sent elsewhere.
-- "Sign out of Claude" in the tray menu clears the stored sign-in.
+- "Sign out of Claude" in the tray menu wipes everything the app stored. To
+  also end the session on Claude's side, use "Log out of all devices" in
+  claude.ai settings.
 
 
 NOTES
