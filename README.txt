@@ -77,6 +77,12 @@ NOTES
   you enabled it, then delete the folder and  %APPDATA%\Claude Usage Tray
 
 
+SUPPORT
+-------
+Questions or bugs: support@dilloncain.com
+or open an issue at github.com/dilloncain/claude-usage-tray/issues
+
+
 TROUBLESHOOTING
 ---------------
 - Widget says "Sign in": your claude.ai session expired. Click Sign in.

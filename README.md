@@ -92,6 +92,10 @@ The app shows a real website (claude.ai) inside its own windows, so it's locked 
 | Numbers look stale | Tray menu → **Refresh now**. |
 | Widget is off-screen | Quit, then delete `%APPDATA%\Claude Usage Tray\settings.json`. |
 
+## Support
+
+Questions, bugs or ideas: [open an issue](../../issues) or email **support@dilloncain.com**.
+
 ## Disclaimer
 
 This is an unofficial tool. It isn't made by, affiliated with, or endorsed by Anthropic. It reads an internal claude.ai endpoint, so a future change to claude.ai could break it. Claude is a trademark of Anthropic PBC.
