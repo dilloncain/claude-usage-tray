@@ -358,6 +358,9 @@ function notifyResets(newBuckets) {
 }
 
 // ---------------------------------------------------------------- tray
+// Tray icons are drawn once per (percent, style) and kept: there are only
+// ~200 possible images, each a few KB. Throwing them away and redrawing made
+// Electron allocate fresh native images that Windows doesn't fully hand back.
 const iconCache = new Map();
 function trayImage(pct) {
   const key = `${pct == null ? 'x' : Math.round(pct)}|${settings.iconStyle}`;
@@ -366,7 +369,6 @@ function trayImage(pct) {
   for (const [size, scaleFactor] of [[16, 1], [24, 1.5], [32, 2]]) {
     img.addRepresentation({ scaleFactor, width: size, height: size, buffer: lib.makeIcon(pct, settings.iconStyle, size) });
   }
-  if (iconCache.size > 64) iconCache.clear();
   iconCache.set(key, img);
   return img;
 }
@@ -768,6 +770,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.setAppUserModelId(app.isPackaged ? APP_ID : process.execPath);
+  // Keep Chromium's caches small; the app shows one tiny page.
+  app.commandLine.appendSwitch('disk-cache-size', String(8 * 1024 * 1024));
   app.on('second-instance', showWidget);
 
   app.whenReady().then(() => {

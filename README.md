@@ -83,6 +83,7 @@ npm start            # run in development
 npm run demo         # run with sample data, no sign-in needed
 npm test             # unit tests (parsing, pace, icons)
 npm run test:e2e     # end-to-end test against a mock claude.ai
+npm run test:soak    # memory soak test (~7 h of polling in 4 minutes)
 npm run dist         # build, brand and verify the app, then the installer, zip and latest.yml
 ```
 

@@ -11,7 +11,8 @@
     "demo": "cross-env CLAUDE_USAGE_DEMO=1 electron .",
     "test": "node --test test/lib.test.js",
     "test:e2e": "electron test/e2e.js",
-    "dist": "electron-builder --win dir --x64 --publish never && node scripts/set-exe-icon.mjs && node scripts/verify-build.mjs --installer && electron-builder --win nsis zip --x64 --prepackaged dist/win-unpacked --publish never"
+    "dist": "electron-builder --win dir --x64 --publish never && node scripts/set-exe-icon.mjs && node scripts/verify-build.mjs --installer && electron-builder --win nsis zip --x64 --prepackaged dist/win-unpacked --publish never",
+    "test:soak": "electron --js-flags=--expose-gc test/soak.js 4"
   },
   "build": {
     "appId": "com.dcain.claudeusagetray",

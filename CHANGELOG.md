@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixed**
+- Slow memory growth in the main process when the usage percentage changed often: tray icons are now drawn once per value and reused instead of being redrawn after a cache reset.
+- Smaller Chromium disk cache.
+
+**Added**
+- `npm run test:soak`: a memory soak test that simulates hours of polling and reports growth after warm-up.
+
 ## 1.1.0 — 2026-11-01
 
 **Added**
