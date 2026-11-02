@@ -5,43 +5,74 @@ const lib = require('../lib');
 
 const iso = (ms) => new Date(Date.now() + ms).toISOString();
 
-test('normalizeUsage: known buckets, order, labels, null buckets skipped', () => {
-  const { buckets, extra } = lib.normalizeUsage({
-    seven_day: { utilization: 18, resets_at: iso(4 * 86400e3) },
+// Shape copied from a real Max account's /usage response (identifiers removed).
+const REAL = () => ({
+  five_hour: { utilization: 8, resets_at: iso(4 * 3600e3), limit_dollars: null, used_dollars: null, remaining_dollars: null, locked_reason: null },
+  seven_day: { utilization: 59, resets_at: iso(5 * 3600e3), limit_dollars: null, used_dollars: null, remaining_dollars: null, locked_reason: null },
+  seven_day_oauth_apps: null, seven_day_opus: null, seven_day_sonnet: null, seven_day_cowork: null, seven_day_omelette: null,
+  tangelo: null, omelette_promotional: null, nimbus_quill: null, promo_credits: null,
+  iguana_necktie: { utilization: 0, resets_at: iso(3 * 86400e3), limit_dollars: 250, used_dollars: 0, remaining_dollars: 250, locked_reason: null },
+  extra_usage: { is_enabled: false, monthly_limit: 2000, used_credits: 0, utilization: 0, currency: 'USD', disabled_reason: 'out_of_credits' },
+  spend: { percent: 0, enabled: false }, member_dashboard_available: true,
+  seven_day_breakdown: { as_of: iso(0), rows: [] }, weekly_scoped_shares: [{ limit_index: 2 }],
+  limits: [
+    { kind: 'session', group: 'session', percent: 8, resets_at: iso(4 * 3600e3), scope: null },
+    { kind: 'weekly_all', group: 'weekly', percent: 59, resets_at: iso(5 * 3600e3), scope: null },
+    { kind: 'weekly_scoped', group: 'weekly', percent: 0, resets_at: iso(5 * 3600e3), scope: { model: { display_name: 'Fable' }, surface: null } },
+  ],
+});
+
+test('normalizeUsage: real response shows exactly what claude.ai shows', () => {
+  const { buckets, credits, extra } = lib.normalizeUsage(REAL());
+  assert.deepEqual(buckets.map(b => [b.key, b.label, b.percent]), [['five_hour', 'Current session', 8], ['seven_day', 'Weekly · all models', 59]]);
+  assert.equal(credits.length, 1);
+  assert.equal(credits[0].label, 'Cloud session credits');
+  assert.deepEqual([credits[0].remaining, credits[0].limit, credits[0].percent], [250, 250, 0]);
+  assert.ok(credits[0].expiresAt > Date.now());
+  assert.equal(extra.enabled, false); // usage credits off -> widget hides the row
+  // No code names, no duplicates, no "Session · Session".
+  const labels = [...buckets, ...credits].map(b => b.label).join('|');
+  assert.ok(!/Iguana|Necktie|Session · Session|Weekly · Weekly|Extra Usage/.test(labels), labels);
+});
+
+test('normalizeUsage: per-model weekly limits appear once in use; limits list wins over flat buckets', () => {
+  const u = REAL();
+  u.limits[2].percent = 37;
+  u.limits[1].percent = 61;            // list says 61, flat says 59 -> list wins
+  u.seven_day_opus = { utilization: 12, resets_at: iso(5 * 3600e3) }; // legacy flat per-model bucket
+  const { buckets } = lib.normalizeUsage(u);
+  assert.deepEqual(buckets.map(b => [b.label, b.percent]), [['Current session', 8], ['Weekly · all models', 61], ['Weekly · Fable', 37], ['Weekly · Opus', 12]]);
+});
+
+test('normalizeUsage: older accounts without a limits list use flat buckets', () => {
+  const { buckets } = lib.normalizeUsage({
     five_hour: { utilization: 42.4, resets_at: iso(3 * 3600e3) },
-    seven_day_opus: null,
-    seven_day_sonnet: { utilization: null, resets_at: null },
+    seven_day: { utilization: 18, resets_at: iso(4 * 86400e3) },
+    seven_day_sonnet: { utilization: 0, resets_at: null },         // unused -> hidden
     seven_day_omelette: { utilization: 7, resets_at: iso(2 * 86400e3) },
-    extra_usage: { is_enabled: true, used_credits: 1234, monthly_limit: 5000, currency: 'USD' },
+    some_new_codename: { utilization: 50, resets_at: null },       // unknown -> never shown
   });
-  assert.deepEqual(buckets.map(b => b.key), ['five_hour', 'seven_day', 'seven_day_omelette']);
-  assert.equal(buckets[0].label, 'Current session');
-  assert.equal(buckets[2].label, 'Weekly · Claude Design');
-  assert.equal(buckets[0].percent, 42.4);
-  assert.ok(buckets[0].resetsAt > Date.now());
-  assert.deepEqual(extra, { enabled: true, used: 12.34, limit: 50, currency: 'USD' });
+  assert.deepEqual(buckets.map(b => [b.key, b.label]), [['five_hour', 'Current session'], ['seven_day', 'Weekly · all models'], ['seven_day_omelette', 'Weekly · Claude Design']]);
 });
 
 test('normalizeUsage: clamps percentages, survives junk input', () => {
-  const { buckets } = lib.normalizeUsage({ five_hour: { utilization: 140, resets_at: 'not a date' }, x: 'str', y: [1, 2], z: { utilization: 'NaN' } });
+  const { buckets } = lib.normalizeUsage({ five_hour: { utilization: 140, resets_at: 'not a date' }, limits: 'x' });
   assert.equal(buckets.length, 1);
   assert.equal(buckets[0].percent, 100);
   assert.equal(buckets[0].resetsAt, null);
-  for (const bad of [null, undefined, 5, 'x', [], {}]) assert.deepEqual(lib.normalizeUsage(bad), { buckets: [], extra: null });
+  for (const bad of [null, undefined, 5, 'x', [], {}]) assert.deepEqual(lib.normalizeUsage(bad), { buckets: [], credits: [], extra: null });
+  const odd = lib.normalizeUsage({ limits: [null, 3, { kind: 'weekly_scoped', percent: 5, scope: null }, { kind: 'session', percent: 'NaN' }] });
+  assert.deepEqual(odd.buckets, []);
 });
 
-test('normalizeUsage: generic limits array, unknown keys get readable labels', () => {
-  const { buckets } = lib.normalizeUsage({
-    seven_day_new_model: { utilization: 3, resets_at: null },
-    limits: [{ kind: 'weekly', group: 'fable', percent: 55, resets_at: null }, { kind: 'weekly', percent: null }],
+test('normalizeUsage: unknown credit allowances get a generic label; extra usage cents', () => {
+  const { credits, extra } = lib.normalizeUsage({
+    brass_thimble: { utilization: 0, resets_at: null, limit_dollars: 50, used_dollars: 10 },
+    extra_usage: { is_enabled: true, used_credits: 1234, monthly_limit: 5000, currency: 'USD' },
   });
-  const labels = buckets.map(b => b.label).sort();
-  assert.deepEqual(labels, ['Weekly · Fable', 'Weekly · New Model']);
-});
-
-test('normalizeUsage: extra usage ignored when limit is zero or missing', () => {
+  assert.deepEqual(credits.map(c => [c.label, c.remaining, c.percent]), [['Included credit', 40, 20]]);
+  assert.deepEqual(extra, { enabled: true, used: 12.34, limit: 50, currency: 'USD' });
   assert.equal(lib.normalizeUsage({ extra_usage: { used_credits: 10, monthly_limit: 0 } }).extra, null);
-  assert.equal(lib.normalizeUsage({ extra_usage: { used_credits: null, monthly_limit: 100 } }).extra, null);
 });
 
 test('pickOrg / planLabel', () => {
@@ -141,10 +172,10 @@ test('isClaudeCookieDomain', () => {
 });
 
 test('normalizeUsage / updatePace ignore prototype-polluting keys', () => {
-  const payload = JSON.parse('{"__proto__":{"utilization":50},"constructor":{"utilization":50},"prototype":{"utilization":5},' +
-    '"five_hour":{"utilization":10},"limits":[{"kind":"__proto__","percent":9}]}');
+  const payload = JSON.parse('{"__proto__":{"utilization":50,"limit_dollars":5},"constructor":{"utilization":50},"prototype":{"utilization":5},' +
+    '"five_hour":{"utilization":10},"limits":[{"kind":"__proto__","percent":9},{"kind":"weekly_scoped","percent":4,"scope":{"model":{"display_name":"__proto__"}}}]}');
   const { buckets } = lib.normalizeUsage(payload);
-  assert.deepEqual(buckets.map(b => b.key), ['five_hour']);
+  assert.deepEqual(buckets.map(b => b.key), ['five_hour', 'weekly_proto']);
   assert.ok(buckets.every(b => typeof b.label === 'string'));
   const samples = Object.create(null);
   lib.updatePace(samples, buckets);

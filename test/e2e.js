@@ -33,10 +33,20 @@ function handler(req) {
     if (!mock.signedIn) return json(403, { type: 'error', error: { type: 'permission_error' } });
     if (url.pathname === '/api/organizations') return json(200, [{ uuid: 'org-1', name: 'Me', capabilities: ['chat', 'claude_max'], rate_limit_tier: 'default_claude_max_5x' }]);
     if (url.pathname === '/api/organizations/org-1/usage') {
+      // Same shape as a real Max account's response.
+      const r1 = new Date(Date.now() + 3600e3).toISOString(), r7 = new Date(Date.now() + 3 * 86400e3).toISOString();
       return json(200, {
-        five_hour: { utilization: mock.usagePct, resets_at: new Date(Date.now() + 3600e3).toISOString() },
-        seven_day: { utilization: 12, resets_at: new Date(Date.now() + 3 * 86400e3).toISOString() },
-        seven_day_opus: null,
+        five_hour: { utilization: mock.usagePct, resets_at: r1, limit_dollars: null },
+        seven_day: { utilization: 12, resets_at: r7, limit_dollars: null },
+        seven_day_opus: null, seven_day_sonnet: null, tangelo: null, nimbus_quill: null,
+        iguana_necktie: { utilization: 0, resets_at: r7, limit_dollars: 250, used_dollars: 0, remaining_dollars: 250 },
+        extra_usage: { is_enabled: false, monthly_limit: 2000, used_credits: 0, utilization: 0, currency: 'USD' },
+        member_dashboard_available: true, weekly_scoped_shares: [{ limit_index: 2 }],
+        limits: [
+          { kind: 'session', group: 'session', percent: mock.usagePct, resets_at: r1, scope: null },
+          { kind: 'weekly_all', group: 'weekly', percent: 12, resets_at: r7, scope: null },
+          { kind: 'weekly_scoped', group: 'weekly', percent: 0, resets_at: r7, scope: { model: { display_name: 'Fable' }, surface: null } },
+        ],
       });
     }
     return json(404, {});
@@ -107,7 +117,9 @@ app.whenReady().then(async () => {
     const cookies = await session.fromPartition('persist:claude').cookies.get({});
     check('Google cookies removed after sign-in', !cookies.some(c => /google/.test(c.domain)), cookies.map(c => c.domain).join(','));
     check('claude.ai cookie kept', cookies.some(c => c.name === 'sessionKey'));
-    check('null bucket (Opus) hidden', !/Opus/.test(await widgetText()));
+    const txt = await widgetText();
+    check('cloud session credits shown with dollars', /Cloud session credits[\s\S]*\$250\.00 of \$250\.00 left/.test(txt));
+    check('no code names, duplicates, or unused rows', !/Iguana|Necktie|Session · Session|Weekly · Weekly|Fable|Opus|Extra Usage|Usage credits/.test(txt), txt.replace(/\s+/g, ' ').slice(0, 200));
 
     // 5. Alerts: crossing 80% fires once.
     shown.length = 0;

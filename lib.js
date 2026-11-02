@@ -28,77 +28,97 @@ function planLabel(org) {
 }
 
 // ---------------------------------------------------------------- usage
-// Known bucket names -> friendly labels. Anything the API adds later is still
-// shown, with a label made from its key.
-const LABELS = Object.assign(Object.create(null), {
+// The usage endpoint returns two shapes side by side:
+//  - "limits": [{ kind: 'session' | 'weekly_all' | 'weekly_scoped', percent, resets_at, scope }]
+//    This is what claude.ai's own usage page shows, so it's preferred.
+//  - flat buckets (five_hour, seven_day, seven_day_opus, ...) for older accounts,
+//    plus many internal code-named entries (e.g. "iguana_necktie") that are null
+//    or are credit allowances. Unknown code names are never shown as limits.
+const FLAT = Object.assign(Object.create(null), {
   five_hour: 'Current session',
   seven_day: 'Weekly · all models',
   seven_day_opus: 'Weekly · Opus',
   seven_day_sonnet: 'Weekly · Sonnet',
-  seven_day_fable: 'Weekly · Fable',
-  seven_day_oauth_apps: 'Weekly · connected apps',
   seven_day_omelette: 'Weekly · Claude Design',
+});
+// Credit allowances whose code name we know (claude.ai's own label).
+const CREDIT_LABELS = Object.assign(Object.create(null), {
+  iguana_necktie: 'Cloud session credits',
 });
 // Keys that must never be used as plain-object property names.
 const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-const ORDER = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_fable'];
-
-function titleCase(s) { return s.replace(/(^|\s|· )([a-z])/g, (m, a, b) => a + b.toUpperCase()); }
-
-function humanize(key) {
-  return titleCase(String(key)
-    .replace(/^seven_day_?/, 'Weekly · ').replace(/^five_hour_?/, 'Session · ')
-    .replace(/_/g, ' ').replace(/\s+/g, ' ').trim());
-}
+const ORDER = ['five_hour', 'seven_day'];
 
 const clampPct = (n) => Math.max(0, Math.min(100, n));
 const parseTime = (t) => (t ? Date.parse(t) || null : null);
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 
 function normalizeUsage(usage) {
-  const buckets = [];
-  const seen = new Set();
-  for (const [key, b] of Object.entries(usage || {})) {
-    if (UNSAFE_KEYS.has(key)) continue;
-    if (!b || typeof b !== 'object' || Array.isArray(b)) continue;
-    if (!('utilization' in b)) continue;
-    const pct = Number(b.utilization);
-    if (b.utilization == null || !Number.isFinite(pct)) continue; // null = not on this plan
-    buckets.push({ key, label: typeof LABELS[key] === 'string' ? LABELS[key] : humanize(key), percent: clampPct(pct), resetsAt: parseTime(b.resets_at) });
-    seen.add(key);
-  }
-  // Newer accounts may also get a generic "limits" array.
-  if (Array.isArray(usage && usage.limits)) {
-    for (const l of usage.limits) {
-      if (!l || typeof l !== 'object') continue;
-      const key = [l.kind, l.group, l.scope].filter(Boolean).map(String).join('_') || 'limit';
-      if (UNSAFE_KEYS.has(key)) continue;
-      const pct = Number(l.percent);
-      if (seen.has(key) || l.percent == null || !Number.isFinite(pct)) continue;
-      const kind = String(l.kind || '');
-      const prefix = /week|seven/i.test(kind) ? 'Weekly · ' : /session|five/i.test(kind) ? 'Session · ' : '';
-      buckets.push({
-        key,
-        label: typeof LABELS[key] === 'string' ? LABELS[key] : prefix + titleCase(String(l.group || kind || key).replace(/_/g, ' ')),
-        percent: clampPct(pct),
-        resetsAt: parseTime(l.resets_at),
-      });
-      seen.add(key);
+  const u = isObj(usage) ? usage : {};
+  const byKey = new Map();
+  const add = (key, label, pct, resetsAt) => {
+    const n = Number(pct);
+    if (pct == null || !Number.isFinite(n) || UNSAFE_KEYS.has(key) || byKey.has(key)) return;
+    byKey.set(key, { key, label, percent: clampPct(n), resetsAt: parseTime(resetsAt) });
+  };
+
+  // 1. The limits list (what claude.ai shows).
+  for (const l of Array.isArray(u.limits) ? u.limits : []) {
+    if (!isObj(l)) continue;
+    if (l.kind === 'session') add('five_hour', FLAT.five_hour, l.percent, l.resets_at);
+    else if (l.kind === 'weekly_all') add('seven_day', FLAT.seven_day, l.percent, l.resets_at);
+    else if (l.kind === 'weekly_scoped') {
+      const scope = isObj(l.scope) ? l.scope : {};
+      const name = String((isObj(scope.model) && scope.model.display_name) || (isObj(scope.surface) && scope.surface.display_name) || '').trim().slice(0, 40);
+      if (!name) continue;
+      // claude.ai hides per-model weekly limits until they're in use; so do we.
+      if (!(Number(l.percent) > 0)) continue;
+      add(`weekly_${slug(name)}`, `Weekly · ${name}`, l.percent, l.resets_at);
     }
   }
+  // 2. Flat buckets, only for known names the list didn't already cover.
+  for (const [key, label] of Object.entries(FLAT)) {
+    const b = u[key];
+    if (!isObj(b)) continue;
+    const scopedKey = key === 'seven_day_opus' ? 'weekly_opus' : key === 'seven_day_sonnet' ? 'weekly_sonnet' : key;
+    if (byKey.has(scopedKey)) continue;
+    if (key.startsWith('seven_day_') && !(Number(b.utilization) > 0)) continue;
+    add(key, label, b.utilization, b.resets_at);
+  }
   const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? 99 : i; };
-  buckets.sort((a, b) => rank(a.key) - rank(b.key) || a.label.localeCompare(b.label));
+  const buckets = [...byKey.values()].sort((a, b) => rank(a.key) - rank(b.key) || a.label.localeCompare(b.label));
 
+  // 3. Included credit allowances (dollar amounts, e.g. cloud session credits).
+  const credits = [];
+  for (const [key, b] of Object.entries(u)) {
+    if (UNSAFE_KEYS.has(key) || !isObj(b) || key in FLAT) continue;
+    const limit = Number(b.limit_dollars);
+    if (b.limit_dollars == null || !Number.isFinite(limit) || limit <= 0) continue;
+    const used = Number.isFinite(Number(b.used_dollars)) ? Number(b.used_dollars) : 0;
+    const remaining = Number.isFinite(Number(b.remaining_dollars)) ? Number(b.remaining_dollars) : Math.max(0, limit - used);
+    credits.push({
+      key,
+      label: typeof CREDIT_LABELS[key] === 'string' ? CREDIT_LABELS[key] : 'Included credit',
+      used, limit, remaining,
+      percent: clampPct((used / limit) * 100),
+      expiresAt: parseTime(b.resets_at),
+      currency: 'USD',
+    });
+  }
+
+  // 4. Usage credits (pay-as-you-go), shown only when turned on.
   let extra = null;
-  const ex = usage && usage.extra_usage;
-  if (ex && ex.used_credits != null && ex.monthly_limit != null && Number(ex.monthly_limit) > 0) {
+  const ex = u.extra_usage;
+  if (isObj(ex) && ex.used_credits != null && ex.monthly_limit != null && Number(ex.monthly_limit) > 0) {
     extra = {
       enabled: Boolean(ex.is_enabled),
       used: Number(ex.used_credits) / 100,   // API reports cents
       limit: Number(ex.monthly_limit) / 100,
-      currency: typeof ex.currency === 'string' ? ex.currency : 'USD',
+      currency: typeof ex.currency === 'string' ? ex.currency.slice(0, 3) : 'USD',
     };
   }
-  return { buckets, extra };
+  return { buckets, credits, extra };
 }
 
 // The API's resets_at jitters by a second or so between reads.

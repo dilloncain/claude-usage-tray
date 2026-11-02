@@ -1,6 +1,6 @@
 # Claude Usage Tray
 
-A small Windows app that shows how much of your **Claude plan** you've used: the 5-hour session limit, your weekly limits, and extra-usage credits. It lives in the system tray and in a compact, always-on-top widget, so you can see what's left without opening claude.ai.
+A small Windows app that shows how much of your **Claude plan** you've used: the 5-hour session limit, your weekly limits, and your credits (such as included cloud session credits and usage credits). It lives in the system tray and in a compact, always-on-top widget, so you can see what's left without opening claude.ai.
 
 ![Widget in light and dark mode](docs/widget.png)
 
@@ -18,15 +18,18 @@ If you use Claude Pro, Max, Team or Enterprise (in the app, on claude.ai or in C
 - **Tray icon** with your current session % (or your highest limit), color-coded green → yellow → orange → red. Hover over it for a summary.
 - **Floating widget**, always on top and draggable (it remembers its position), in light and dark mode. Shows:
   - The current session limit.
-  - Weekly limits for all models and per-model (Opus, Sonnet and others, when your plan has them).
-  - Extra-usage spend.
+  - Weekly limits for all models, plus per-model weekly limits (such as Opus or Fable) once you start using them.
+  - Included credits, such as cloud session credits: how much is left and when they expire.
+  - Usage credits spent this month, when you have them turned on.
+
+  It shows the same limits and labels as claude.ai's **Settings → Usage** page.
 - **Optional alerts** at 50 / 75 / 80 / 90 / 95 / 100%. Each one fires once per limit window. There's also a "session reset" notification, and a test button.
 - **Settings** from the tray menu: refresh interval (30 s to 5 min), icon style (number or ring), widget opacity, and Start with Windows.
 - **Private.** You sign in on claude.ai's own page inside the app, so your password never touches this code. Your session stays on your PC. The app only talks to claude.ai, with no analytics or telemetry.
 
 ## Install (Windows 10 / 11)
 
-1. Download **`ClaudeUsageTray-1.0.0-win-x64.zip`** from the [latest release](../../releases/latest).
+1. Download **`ClaudeUsageTray-1.0.1-win-x64.zip`** from the [latest release](../../releases/latest).
 2. Right-click the zip → **Extract All…**, and put the folder somewhere permanent (for example `C:\Users\<you>\Apps\Claude Usage Tray`).
 3. Open the folder and run **`Claude Usage Tray.exe`**.
    - If SmartScreen shows *"Windows protected your PC"*, click **More info → Run anyway**. The app isn't code-signed.
@@ -53,7 +56,7 @@ GET https://claude.ai/api/organizations             → your organization id
 GET https://claude.ai/api/organizations/{id}/usage  → five_hour, seven_day, seven_day_opus, …
 ```
 
-Each limit comes back as a utilization percentage and a reset time. The approach follows the open-source [Claude Monitor](https://github.com/claude-monitor/claude-monitor-browser-extension) browser extension. If claude.ai asks for a browser check, the request runs inside a hidden claude.ai page instead.
+The app reads the `limits` list (session, weekly, per-model weekly) that claude.ai's usage page uses, falls back to the older `five_hour` / `seven_day` fields on older accounts, and shows included credit allowances in dollars. The response also contains many internal code-named fields; the app never shows those as limits. The approach follows the open-source [Claude Monitor](https://github.com/claude-monitor/claude-monitor-browser-extension) browser extension. If claude.ai asks for a browser check, the request runs inside a hidden claude.ai page instead.
 
 Claude doesn't publish token counts for plan limits, so the app shows percentages, the same as claude.ai.
 
@@ -91,6 +94,10 @@ The app shows a real website (claude.ai) inside its own windows, so it's locked 
 | Google sign-in won't go through | Use **Continue with email** and enter the code Claude emails you. |
 | Numbers look stale | Tray menu → **Refresh now**. |
 | Widget is off-screen | Quit, then delete `%APPDATA%\Claude Usage Tray\settings.json`. |
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Support
 

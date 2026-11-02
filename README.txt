@@ -1,9 +1,10 @@
-CLAUDE USAGE TRAY  -  v1.0.0
+CLAUDE USAGE TRAY  -  v1.0.1
 ============================
 
 Shows how much of your Claude plan you've used: the 5-hour session limit,
-the weekly limits, and extra-usage credits, right in the Windows tray and in
-a small always-on-top widget.
+the weekly limits, and your credits (like included cloud session credits),
+right in the Windows tray and in a small always-on-top widget. It shows the
+same limits as claude.ai's Settings > Usage page.
 
 Works with any Claude Pro, Max, Team or Enterprise account. Each person signs
 in with their own account on their own PC.

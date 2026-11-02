@@ -108,6 +108,7 @@ const state = {
   error: null,
   plan: null,
   buckets: [],                // [{ key, label, percent, resetsAt }]
+  credits: [],                // [{ key, label, used, limit, remaining, percent, expiresAt, currency }]
   extra: null,                // { used, limit, currency, enabled }
   updatedAt: null,
   pace: {},                   // bucket key -> ms until 100% at the current rate, or null
@@ -215,6 +216,7 @@ function demoUsage() {
     five_hour: { utilization: 83, resets_at: iso(2 * 3600e3 + 14 * 60e3) },
     seven_day: { utilization: 41, resets_at: iso(3 * 86400e3 + 5 * 3600e3) },
     seven_day_opus: { utilization: 22, resets_at: iso(3 * 86400e3 + 5 * 3600e3) },
+    iguana_necktie: { utilization: 0, resets_at: iso(3 * 86400e3 + 6 * 3600e3), limit_dollars: 250, used_dollars: 38.5, remaining_dollars: 211.5 },
     extra_usage: { is_enabled: true, used_credits: 1234, monthly_limit: 5000, currency: 'USD' },
   };
 }
@@ -236,8 +238,8 @@ async function poll() {
   const gen = generation;
   try {
     if (DEMO) {
-      const { buckets, extra } = lib.normalizeUsage(demoUsage());
-      Object.assign(state, { status: 'ok', error: null, plan: 'Max 5x', buckets, extra, updatedAt: Date.now(), pace: { five_hour: 47 * 60e3 } });
+      const { buckets, credits, extra } = lib.normalizeUsage(demoUsage());
+      Object.assign(state, { status: 'ok', error: null, plan: 'Max 5x', buckets, credits, extra, updatedAt: Date.now(), pace: { five_hour: 47 * 60e3 } });
       return;
     }
     let plan = state.plan;
@@ -246,7 +248,7 @@ async function poll() {
       try { orgs = await fetchJson(`${API}/organizations`); }
       catch (e) {
         if (isAuthError(e) && gen === generation) {
-          Object.assign(state, { status: 'signed-out', error: null, buckets: [], extra: null, plan: null, pace: {} });
+          Object.assign(state, { status: 'signed-out', error: null, buckets: [], credits: [], extra: null, plan: null, pace: {} });
           if (!promptedLogin && !process.argv.includes(AUTOSTART_ARG)) { promptedLogin = true; setTimeout(openLogin, 300); }
           return;
         }
@@ -268,9 +270,9 @@ async function poll() {
       throw e;
     }
     if (gen !== generation) return; // signed out / in while this was running
-    const { buckets, extra } = lib.normalizeUsage(usage);
+    const { buckets, credits, extra } = lib.normalizeUsage(usage);
     notifyResets(buckets);
-    Object.assign(state, { status: 'ok', error: null, plan, buckets, extra, updatedAt: Date.now() });
+    Object.assign(state, { status: 'ok', error: null, plan, buckets, credits, extra, updatedAt: Date.now() });
     state.pace = lib.updatePace(samples, buckets);
     checkAlerts();
   } catch (e) {
@@ -602,7 +604,7 @@ async function signOut() {
   await claudeSession().clearStorageData();
   await claudeSession().clearCache();
   await claudeSession().clearAuthCache();
-  Object.assign(state, { status: 'signed-out', buckets: [], extra: null, plan: null, error: null, pace: {} });
+  Object.assign(state, { status: 'signed-out', buckets: [], credits: [], extra: null, plan: null, error: null, pace: {} });
   render(true);
 }
 

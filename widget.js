@@ -95,9 +95,17 @@ function build() {
       }
       body.append(row);
     }
+    // Included credit allowances, e.g. cloud session credits: "$250 of $250 left".
+    for (const c of s.credits || []) {
+      const { row, sub } = bar(c.label, c.percent, `${money(c.remaining, c.currency)} of ${money(c.limit, c.currency)} left`);
+      body.append(row);
+      if (c.expiresAt) {
+        sub.append(el('span', 'muted-right', `Expires ${resetWhen(c.expiresAt)}`));
+      }
+    }
     if (s.extra && s.extra.enabled) {
       const pct = Math.min(100, (s.extra.used / s.extra.limit) * 100);
-      body.append(bar('Extra usage this month', pct, `${money(s.extra.used, s.extra.currency)} of ${money(s.extra.limit, s.extra.currency)}`).row);
+      body.append(bar('Usage credits this month', pct, `${money(s.extra.used, s.extra.currency)} of ${money(s.extra.limit, s.extra.currency)}`).row);
     }
   }
   tick();
