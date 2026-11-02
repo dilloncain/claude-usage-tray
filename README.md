@@ -33,7 +33,7 @@ Download from the [latest release](../../releases/latest). There are two options
 
 ### Installer (recommended)
 
-1. Download **`ClaudeUsageTray-Setup-1.1.0.exe`** and run it.
+1. Download **`ClaudeUsageTray-Setup-1.1.1.exe`** and run it.
    - If SmartScreen shows *"Windows protected your PC"*, click **More info → Run anyway**. The app isn't code-signed.
 2. It installs in a few seconds, just for you (no admin rights needed), adds Start Menu and desktop shortcuts, and starts the app.
 3. Sign in to Claude in the window that opens (email code, Google or Apple). It closes on its own and the widget appears.
@@ -42,7 +42,7 @@ Download from the [latest release](../../releases/latest). There are two options
 
 ### Portable zip
 
-1. Download **`ClaudeUsageTray-1.1.0-win-x64.zip`**, right-click it → **Extract All…**, and keep the folder somewhere permanent.
+1. Download **`ClaudeUsageTray-1.1.1-win-x64.zip`**, right-click it → **Extract All…**, and keep the folder somewhere permanent.
 2. Run **`Claude Usage Tray.exe`** from that folder and sign in.
 
 The zip copy doesn't update itself; download a new zip to update.

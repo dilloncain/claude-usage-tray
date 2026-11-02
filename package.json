@@ -1,7 +1,7 @@
 {
   "name": "claude-usage-tray",
   "productName": "Claude Usage Tray",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Windows tray app that shows your Claude session and weekly usage limits.",
   "main": "main.js",
   "author": "Dillon Cain",

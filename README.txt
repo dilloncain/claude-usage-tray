@@ -1,4 +1,4 @@
-CLAUDE USAGE TRAY  -  v1.1.0
+CLAUDE USAGE TRAY  -  v1.1.1
 ============================
 
 Shows how much of your Claude plan you've used: the 5-hour session limit,
@@ -13,7 +13,7 @@ in with their own account on their own PC.
 SETUP (about a minute)
 ----------------------
 INSTALLER (recommended)
-1. Run  ClaudeUsageTray-Setup-1.1.0.exe
+1. Run  ClaudeUsageTray-Setup-1.1.1.exe
    - If Windows SmartScreen says "Windows protected your PC", click
      "More info" > "Run anyway". (The app isn't code-signed, that's all.)
 2. It installs just for you (no admin needed), adds shortcuts, and starts.

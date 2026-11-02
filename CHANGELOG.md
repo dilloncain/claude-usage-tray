@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 — 2026-11-01
 
 **Fixed**
 - Slow memory growth in the main process when the usage percentage changed often: tray icons are now drawn once per value and reused instead of being redrawn after a cache reset.
