@@ -29,23 +29,36 @@ If you use Claude Pro, Max, Team or Enterprise (in the app, on claude.ai or in C
 
 ## Install (Windows 10 / 11)
 
-1. Download **`ClaudeUsageTray-1.0.1-win-x64.zip`** from the [latest release](../../releases/latest).
-2. Right-click the zip → **Extract All…**, and put the folder somewhere permanent (for example `C:\Users\<you>\Apps\Claude Usage Tray`).
-3. Open the folder and run **`Claude Usage Tray.exe`**.
+Download from the [latest release](../../releases/latest). There are two options:
+
+### Installer (recommended)
+
+1. Download **`ClaudeUsageTray-Setup-1.1.0.exe`** and run it.
    - If SmartScreen shows *"Windows protected your PC"*, click **More info → Run anyway**. The app isn't code-signed.
-4. Sign in to Claude in the window that opens (email code, Google or Apple). It closes on its own and the widget appears.
+2. It installs in a few seconds, just for you (no admin rights needed), adds Start Menu and desktop shortcuts, and starts the app.
+3. Sign in to Claude in the window that opens (email code, Google or Apple). It closes on its own and the widget appears.
+
+**Updates are automatic.** The installed app checks this repo's releases every few hours, downloads new versions in the background, verifies each download against the SHA-512 checksum published with the release, and installs the update the next time you quit (or right away with **Restart to update** in the tray menu). Turn it off under **Settings → Install updates automatically**, or use **Check for updates** in the tray menu.
+
+### Portable zip
+
+1. Download **`ClaudeUsageTray-1.1.0-win-x64.zip`**, right-click it → **Extract All…**, and keep the folder somewhere permanent.
+2. Run **`Claude Usage Tray.exe`** from that folder and sign in.
+
+The zip copy doesn't update itself; download a new zip to update.
 
 **Tips**
 - The tray icon may be hidden under the **^** next to the clock. Drag it onto the taskbar to keep it visible.
 - Left-click the tray icon to show or hide the widget. Right-click it for the menu.
 
-Each person signs in with their own account, so you can share the zip with friends and it shows their own usage.
+Each person signs in with their own account, so you can share the app with friends and it shows their own usage.
 
 ## Uninstall
 
-1. Turn off **Start with Windows** if you enabled it.
-2. Quit from the tray menu.
-3. Delete the app folder and `%APPDATA%\Claude Usage Tray`.
+- **Installer:** Windows **Settings → Apps → Installed apps → Claude Usage Tray → Uninstall**.
+- **Zip:** turn off **Start with Windows** if you enabled it, quit from the tray menu, and delete the folder.
+
+Your settings and sign-in live in `%APPDATA%\Claude Usage Tray`. Delete that folder too to remove everything (or use **Sign out of Claude** first).
 
 ## How it works
 
@@ -70,7 +83,7 @@ npm start            # run in development
 npm run demo         # run with sample data, no sign-in needed
 npm test             # unit tests (parsing, pace, icons)
 npm run test:e2e     # end-to-end test against a mock claude.ai
-npm run dist         # build dist/win-unpacked with icon + version info
+npm run dist         # build, brand and verify the app, then the installer, zip and latest.yml
 ```
 
 Built with Electron. The tray icons are drawn in code, so there are no image assets. `lib.js` holds the pure logic; `main.js` the Electron side.
@@ -85,6 +98,7 @@ The app shows a real website (claude.ai) inside its own windows, so it's locked 
 - Electron **fuses** are set: cookies are encrypted at rest, and the exe can't be run as plain Node or with debugging flags. The app code is checked for integrity at launch.
 - Requests are hard-coded to `https://claude.ai/api/…` and time out after 20 seconds. Nothing from the network is ever run as code.
 - **Sign out** clears all stored cookies and cache.
+- **Updates** come only from this repo's GitHub Releases over HTTPS, and each download must match the SHA-512 checksum in the release's `latest.yml` before it installs. Because the app isn't code-signed, protect the GitHub account that publishes releases with two-factor authentication.
 
 ## Troubleshooting
 

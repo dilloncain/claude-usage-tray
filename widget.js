@@ -27,8 +27,9 @@ function resetWhen(t) {
 }
 
 function money(n, cur) {
-  try { return new Intl.NumberFormat([], { style: 'currency', currency: cur }).format(n); }
-  catch { return `$${n.toFixed(2)}`; }
+  const v = Number.isFinite(n) ? n : 0;
+  try { return new Intl.NumberFormat([], { style: 'currency', currency: cur || 'USD' }).format(v); }
+  catch { return `$${v.toFixed(2)}`; }
 }
 
 function el(tag, cls, text) {
@@ -38,17 +39,20 @@ function el(tag, cls, text) {
   return e;
 }
 
-function bar(label, pct, subText) {
+// opts.right: text for the top-right (defaults to the %); opts.levelFor: % used for the colour.
+function bar(label, pct, subText, opts = {}) {
   const row = el('div', 'row');
   const head = el('div', 'top');
-  head.append(el('span', 'label', label), el('span', 'pct', `${Math.round(pct)}%`));
+  const name = el('span', 'label', label);
+  name.title = label;
+  head.append(name, el('span', 'pct', opts.right != null ? opts.right : `${Math.round(pct)}%`));
   const track = el('div', 'track');
   track.setAttribute('role', 'progressbar');
   track.setAttribute('aria-label', label);
   track.setAttribute('aria-valuenow', String(Math.round(pct)));
   track.setAttribute('aria-valuemin', '0');
   track.setAttribute('aria-valuemax', '100');
-  const fill = el('div', `fill lvl-${level(pct)}`);
+  const fill = el('div', `fill lvl-${level(opts.levelFor != null ? opts.levelFor : pct)}`);
   fill.style.width = `${Math.max(1.5, pct)}%`;
   track.append(fill);
   const sub = el('div', 'sub');
@@ -97,10 +101,12 @@ function build() {
     }
     // Included credit allowances, e.g. cloud session credits: "$250 of $250 left".
     for (const c of s.credits || []) {
-      const { row, sub } = bar(c.label, c.percent, `${money(c.remaining, c.currency)} of ${money(c.limit, c.currency)} left`);
+      // Bar shows what's left; colour warns as it runs low.
+      const { row, sub } = bar(c.label, c.percentLeft, `${money(c.remaining, c.currency)} of ${money(c.limit, c.currency)} left`,
+        { right: `${Math.round(c.percentLeft)}% left`, levelFor: 100 - c.percentLeft });
       body.append(row);
       if (c.expiresAt) {
-        sub.append(el('span', 'muted-right', `Expires ${resetWhen(c.expiresAt)}`));
+        sub.append(el('span', null, `Expires ${new Date(c.expiresAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}`));
       }
     }
     if (s.extra && s.extra.enabled) {

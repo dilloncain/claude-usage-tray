@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.0 — 2026-11-01
+
+**Added**
+- **Installer** (`ClaudeUsageTray-Setup-1.1.0.exe`): one-click, per-user install with no admin rights, Start Menu and desktop shortcuts, and a normal uninstaller in Windows Settings.
+- **Automatic updates** for installed copies, from this repo's GitHub Releases. Downloads are verified against the release's SHA-512 checksum and install when you quit, or right away with **Restart to update**. Can be turned off; **Check for updates** in the tray menu.
+- **About** item in the tray menu showing the version.
+
+**Fixed**
+- Included credits now show what's left ("85% left") and the expiry as a date ("Expires Nov 5"), like claude.ai. Expired allowances are hidden.
+- Per-model limits that differ only by surface (for example Claude Code vs. web) no longer hide each other, and legacy fields can't duplicate rows from the limits list.
+- Odd values in the response (missing or negative dollar amounts, bad currency codes) can no longer show wrong numbers or blank the widget.
+- Signing in to a different account clears the previous account's pace history.
+- Long limit names are trimmed instead of overflowing.
+
 ## 1.0.1 — 2026-11-01
 
 **Fixed**

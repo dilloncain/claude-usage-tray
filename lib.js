@@ -54,36 +54,40 @@ const parseTime = (t) => (t ? Date.parse(t) || null : null);
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 
+const num = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+const MAX_CREDIT_ROWS = 4;
+
 function normalizeUsage(usage) {
   const u = isObj(usage) ? usage : {};
   const byKey = new Map();
   const add = (key, label, pct, resetsAt) => {
-    const n = Number(pct);
-    if (pct == null || !Number.isFinite(n) || UNSAFE_KEYS.has(key) || byKey.has(key)) return;
+    const n = num(pct);
+    if (n == null || UNSAFE_KEYS.has(key) || byKey.has(key)) return;
     byKey.set(key, { key, label, percent: clampPct(n), resetsAt: parseTime(resetsAt) });
   };
+  const list = Array.isArray(u.limits) ? u.limits.filter(isObj) : [];
 
   // 1. The limits list (what claude.ai shows).
-  for (const l of Array.isArray(u.limits) ? u.limits : []) {
-    if (!isObj(l)) continue;
+  list.forEach((l, i) => {
     if (l.kind === 'session') add('five_hour', FLAT.five_hour, l.percent, l.resets_at);
     else if (l.kind === 'weekly_all') add('seven_day', FLAT.seven_day, l.percent, l.resets_at);
     else if (l.kind === 'weekly_scoped') {
       const scope = isObj(l.scope) ? l.scope : {};
-      const name = String((isObj(scope.model) && scope.model.display_name) || (isObj(scope.surface) && scope.surface.display_name) || '').trim().slice(0, 40);
-      if (!name) continue;
+      const part = (o) => (isObj(o) && typeof o.display_name === 'string' ? o.display_name.trim().slice(0, 30) : '');
+      const name = [part(scope.model), part(scope.surface)].filter(Boolean).join(' · ');
+      if (!name) return;
       // claude.ai hides per-model weekly limits until they're in use; so do we.
-      if (!(Number(l.percent) > 0)) continue;
-      add(`weekly_${slug(name)}`, `Weekly · ${name}`, l.percent, l.resets_at);
+      if (!(num(l.percent) > 0)) return;
+      add(`weekly_${slug(name) || `scoped${i}`}`, `Weekly · ${name}`, l.percent, l.resets_at);
     }
-  }
-  // 2. Flat buckets, only for known names the list didn't already cover.
+  });
+  // 2. Flat buckets: accounts with a limits list only use them for anything
+  //    the list left out of session/weekly; older accounts use all known ones.
   for (const [key, label] of Object.entries(FLAT)) {
+    if (list.length && key !== 'five_hour' && key !== 'seven_day') continue;
     const b = u[key];
     if (!isObj(b)) continue;
-    const scopedKey = key === 'seven_day_opus' ? 'weekly_opus' : key === 'seven_day_sonnet' ? 'weekly_sonnet' : key;
-    if (byKey.has(scopedKey)) continue;
-    if (key.startsWith('seven_day_') && !(Number(b.utilization) > 0)) continue;
+    if (key.startsWith('seven_day_') && !(num(b.utilization) > 0)) continue;
     add(key, label, b.utilization, b.resets_at);
   }
   const rank = (k) => { const i = ORDER.indexOf(k); return i < 0 ? 99 : i; };
@@ -91,18 +95,24 @@ function normalizeUsage(usage) {
 
   // 3. Included credit allowances (dollar amounts, e.g. cloud session credits).
   const credits = [];
+  const now = Date.now();
   for (const [key, b] of Object.entries(u)) {
-    if (UNSAFE_KEYS.has(key) || !isObj(b) || key in FLAT) continue;
-    const limit = Number(b.limit_dollars);
-    if (b.limit_dollars == null || !Number.isFinite(limit) || limit <= 0) continue;
-    const used = Number.isFinite(Number(b.used_dollars)) ? Number(b.used_dollars) : 0;
-    const remaining = Number.isFinite(Number(b.remaining_dollars)) ? Number(b.remaining_dollars) : Math.max(0, limit - used);
+    if (credits.length >= MAX_CREDIT_ROWS) break;
+    if (UNSAFE_KEYS.has(key) || !isObj(b) || key in FLAT || key === 'spend' || key === 'extra_usage') continue;
+    if (!('used_dollars' in b) && !('remaining_dollars' in b)) continue;
+    const limit = num(b.limit_dollars);
+    if (limit == null || limit <= 0) continue;
+    const expiresAt = parseTime(b.resets_at);
+    if (expiresAt && expiresAt < now) continue; // already expired
+    const used = Math.max(0, num(b.used_dollars) ?? 0);
+    const rem = num(b.remaining_dollars);
+    const remaining = Math.max(0, Math.min(limit, rem != null ? rem : limit - used));
     credits.push({
       key,
       label: typeof CREDIT_LABELS[key] === 'string' ? CREDIT_LABELS[key] : 'Included credit',
       used, limit, remaining,
-      percent: clampPct((used / limit) * 100),
-      expiresAt: parseTime(b.resets_at),
+      percentLeft: clampPct((remaining / limit) * 100),
+      expiresAt,
       currency: 'USD',
     });
   }
@@ -110,12 +120,14 @@ function normalizeUsage(usage) {
   // 4. Usage credits (pay-as-you-go), shown only when turned on.
   let extra = null;
   const ex = u.extra_usage;
-  if (isObj(ex) && ex.used_credits != null && ex.monthly_limit != null && Number(ex.monthly_limit) > 0) {
+  const usedC = isObj(ex) ? num(ex.used_credits) : null;
+  const limitC = isObj(ex) ? num(ex.monthly_limit) : null;
+  if (usedC != null && usedC >= 0 && limitC != null && limitC > 0) {
     extra = {
       enabled: Boolean(ex.is_enabled),
-      used: Number(ex.used_credits) / 100,   // API reports cents
-      limit: Number(ex.monthly_limit) / 100,
-      currency: typeof ex.currency === 'string' ? ex.currency.slice(0, 3) : 'USD',
+      used: usedC / 100,   // API reports cents
+      limit: limitC / 100,
+      currency: typeof ex.currency === 'string' && /^[A-Z]{3}$/i.test(ex.currency) ? ex.currency.toUpperCase() : 'USD',
     };
   }
   return { buckets, credits, extra };

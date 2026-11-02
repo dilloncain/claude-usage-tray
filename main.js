@@ -41,6 +41,7 @@ const DEFAULTS = Object.freeze({
   widgetBounds: null,
   widgetOpacity: 1,
   startWithWindows: false,
+  autoUpdate: true,             // installed (setup.exe) copies only
   notified: {},                 // "<bucket>|<window minute>|<threshold>" -> true
 });
 const THRESHOLD_CHOICES = [50, 75, 80, 90, 95, 100];
@@ -63,6 +64,7 @@ function sanitizeSettings(raw) {
   if (b && [b.x, b.y].every(Number.isFinite)) s.widgetBounds = { x: Math.round(b.x), y: Math.round(b.y) };
   if ([1, 0.9, 0.75, 0.6].includes(raw.widgetOpacity)) s.widgetOpacity = raw.widgetOpacity;
   if (typeof raw.startWithWindows === 'boolean') s.startWithWindows = raw.startWithWindows;
+  if (typeof raw.autoUpdate === 'boolean') s.autoUpdate = raw.autoUpdate;
   if (raw.notified && typeof raw.notified === 'object' && !Array.isArray(raw.notified)) {
     for (const [k, v] of Object.entries(raw.notified).slice(0, 200)) if (v === true) s.notified[k] = true;
   }
@@ -249,6 +251,7 @@ async function poll() {
       catch (e) {
         if (isAuthError(e) && gen === generation) {
           Object.assign(state, { status: 'signed-out', error: null, buckets: [], credits: [], extra: null, plan: null, pace: {} });
+          for (const k of Object.keys(samples)) delete samples[k];
           if (!promptedLogin && !process.argv.includes(AUTOSTART_ARG)) { promptedLogin = true; setTimeout(openLogin, 300); }
           return;
         }
@@ -429,8 +432,13 @@ function buildMenu() {
           ],
         },
         { label: 'Start with Windows', type: 'checkbox', checked: settings.startWithWindows, click: (i) => setAutoStart(i.checked) },
+        ...(updater ? [{ label: 'Install updates automatically', type: 'checkbox', checked: settings.autoUpdate, click: (i) => { settings.autoUpdate = i.checked; saveSettings(); } }] : []),
       ],
     },
+    ...(updater ? [updateReady
+      ? { label: `Restart to update (v${updateReady})`, click: restartToUpdate }
+      : { label: 'Check for updates', click: checkForUpdatesNow }] : []),
+    { label: `About (version ${app.getVersion()})`, click: () => shell.openExternal('https://github.com/dilloncain/claude-usage-tray#readme') },
     { type: 'separator' },
     ...(DEMO ? [] : state.status === 'signed-out'
       ? [{ label: 'Sign in to Claude…', click: openLogin }]
@@ -559,6 +567,8 @@ function openLogin() {
       clearInterval(check);
       generation++;
       orgId = null;
+      for (const k of Object.keys(samples)) delete samples[k];
+      Object.assign(state, { buckets: [], credits: [], extra: null, plan: null, pace: {} });
       pageMode = false;
       destroyFetchWin();
       closeAuthWindows();
@@ -669,6 +679,67 @@ app.on('web-contents-created', (_e, wc) => {
   });
 });
 
+// ---------------------------------------------------------------- updates
+// Only the installed copy (from ClaudeUsageTray-Setup-x.y.z.exe) updates itself;
+// a copy unzipped by hand can't replace its own files safely. Updates come from
+// this project's GitHub Releases, and each download is checked against the
+// SHA-512 published with the release before it's installed.
+const UPDATE_EVERY_MS = 6 * 3600e3;
+let updater = null;
+let updateReady = null;      // version string once downloaded
+let updateManual = false;    // the person clicked "Check for updates"
+let updateBusy = false;
+
+function isInstalledCopy() {
+  if (!app.isPackaged || process.platform !== 'win32') return false;
+  try { return fs.readdirSync(path.dirname(process.execPath)).some(f => /^Uninstall .*\.exe$/i.test(f)); }
+  catch { return false; }
+}
+
+function setupUpdater() {
+  if (!isInstalledCopy()) return;
+  try { ({ autoUpdater: updater } = require('electron-updater')); } catch { return; }
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  updater.allowPrerelease = false;
+  updater.allowDowngrade = false;
+  updater.logger = null;
+  updater.on('update-not-available', () => {
+    if (updateManual) notify('Claude Usage Tray is up to date', `You have the latest version (${app.getVersion()}).`);
+    updateManual = false;
+  });
+  updater.on('update-downloaded', (info) => {
+    updateReady = String((info && info.version) || '').slice(0, 20) || 'new';
+    updateManual = false;
+    notify(`Update ready: version ${updateReady}`, 'It installs when you quit, or choose "Restart to update" in the tray menu.');
+    render(true);
+  });
+  updater.on('error', () => {
+    if (updateManual) notify('Couldn\'t check for updates', 'Check your connection and try again later.');
+    updateManual = false;
+  });
+  const check = () => {
+    if (!settings.autoUpdate || updateReady || updateBusy) return;
+    updateBusy = true;
+    updater.checkForUpdates().catch(() => {}).finally(() => { updateBusy = false; });
+  };
+  setTimeout(check, 15000);
+  setInterval(check, UPDATE_EVERY_MS);
+}
+
+function checkForUpdatesNow() {
+  if (!updater || updateBusy) return;
+  updateManual = true;
+  updateBusy = true;
+  updater.checkForUpdates().catch(() => {}).finally(() => { updateBusy = false; });
+}
+
+function restartToUpdate() {
+  if (!updater || !updateReady) return;
+  quitting = true;
+  updater.quitAndInstall(true, true); // silent install, then reopen the app
+}
+
 // ---------------------------------------------------------------- Windows integration
 function autoStartOptions() {
   return { path: process.execPath, args: app.isPackaged ? [AUTOSTART_ARG] : [app.getAppPath(), AUTOSTART_ARG] };
@@ -681,9 +752,9 @@ function setAutoStart(on) {
 }
 
 // Windows only shows toasts for apps with a Start Menu shortcut carrying their
-// AppUserModelID. The zip has no installer, so create that shortcut once.
+// AppUserModelID. The installer creates one; for the zip copy, create it here.
 function ensureStartMenuShortcut() {
-  if (process.platform !== 'win32' || !app.isPackaged) return;
+  if (process.platform !== 'win32' || !app.isPackaged || isInstalledCopy()) return;
   try {
     const lnk = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Claude Usage Tray.lnk');
     let ok = false;
@@ -713,6 +784,7 @@ if (!app.requestSingleInstanceLock()) {
     createWidget();
     render(true);
     startPolling();
+    setupUpdater();
 
     // Keep the tooltip countdown fresh between polls.
     setInterval(() => render(), 30000);

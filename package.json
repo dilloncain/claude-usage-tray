@@ -1,7 +1,7 @@
 {
   "name": "claude-usage-tray",
   "productName": "Claude Usage Tray",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Windows tray app that shows your Claude session and weekly usage limits.",
   "main": "main.js",
   "author": "Dillon Cain",
@@ -11,7 +11,7 @@
     "demo": "cross-env CLAUDE_USAGE_DEMO=1 electron .",
     "test": "node --test test/lib.test.js",
     "test:e2e": "electron test/e2e.js",
-    "dist": "electron-builder --win dir --x64 && node scripts/set-exe-icon.mjs && node scripts/verify-build.mjs"
+    "dist": "electron-builder --win dir --x64 --publish never && node scripts/set-exe-icon.mjs && node scripts/verify-build.mjs --installer && electron-builder --win nsis zip --x64 --prepackaged dist/win-unpacked --publish never"
   },
   "build": {
     "appId": "com.dcain.claudeusagetray",
@@ -26,8 +26,22 @@
       "package.json"
     ],
     "win": {
-      "target": "zip",
-      "signAndEditExecutable": false
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false
     },
     "artifactName": "ClaudeUsageTray-${version}-win-x64.${ext}",
     "extraFiles": [
@@ -44,18 +58,42 @@
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true
     },
-    "asar": true
+    "asar": true,
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Claude Usage Tray",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "ClaudeUsageTray-Setup-${version}.${ext}",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "uninstallDisplayName": "Claude Usage Tray"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dilloncain",
+        "repo": "claude-usage-tray",
+        "releaseType": "release"
+      }
+    ]
   },
   "devDependencies": {
+    "@electron/asar": "^3.2.17",
+    "@electron/fuses": "^1.8.0",
+    "cross-env": "^7.0.3",
     "electron": "^45.2.1",
     "electron-builder": "^26.0.12",
-    "resedit": "^2.0.3",
-    "cross-env": "^7.0.3",
-    "@electron/fuses": "^1.8.0",
-    "@electron/asar": "^3.2.17"
+    "resedit": "^2.0.3"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/dilloncain/claude-usage-tray"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

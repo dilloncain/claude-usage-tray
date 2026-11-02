@@ -69,7 +69,8 @@ main { padding: 2px 12px 6px; }
 .row { padding: 7px 0; }
 .row + .row { border-top: 1px solid var(--line); }
 .row .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.row .label { font-weight: 500; }
+.row .label { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .pct { flex: none; }
 .row .pct { font-variant-numeric: tabular-nums; font-weight: 600; }
 .track { height: 6px; border-radius: 999px; background: var(--track); margin: 5px 0 4px; overflow: hidden; }
 .fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }

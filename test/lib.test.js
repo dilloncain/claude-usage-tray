@@ -27,7 +27,7 @@ test('normalizeUsage: real response shows exactly what claude.ai shows', () => {
   assert.deepEqual(buckets.map(b => [b.key, b.label, b.percent]), [['five_hour', 'Current session', 8], ['seven_day', 'Weekly · all models', 59]]);
   assert.equal(credits.length, 1);
   assert.equal(credits[0].label, 'Cloud session credits');
-  assert.deepEqual([credits[0].remaining, credits[0].limit, credits[0].percent], [250, 250, 0]);
+  assert.deepEqual([credits[0].remaining, credits[0].limit, credits[0].percentLeft], [250, 250, 100]);
   assert.ok(credits[0].expiresAt > Date.now());
   assert.equal(extra.enabled, false); // usage credits off -> widget hides the row
   // No code names, no duplicates, no "Session · Session".
@@ -39,9 +39,10 @@ test('normalizeUsage: per-model weekly limits appear once in use; limits list wi
   const u = REAL();
   u.limits[2].percent = 37;
   u.limits[1].percent = 61;            // list says 61, flat says 59 -> list wins
-  u.seven_day_opus = { utilization: 12, resets_at: iso(5 * 3600e3) }; // legacy flat per-model bucket
+  u.limits.push({ kind: 'weekly_scoped', percent: 12, resets_at: iso(5 * 3600e3), scope: { model: { display_name: 'Opus 4.5' }, surface: { display_name: 'Claude Code' } } });
+  u.seven_day_opus = { utilization: 12, resets_at: iso(5 * 3600e3) }; // same limit, legacy field -> not shown twice
   const { buckets } = lib.normalizeUsage(u);
-  assert.deepEqual(buckets.map(b => [b.label, b.percent]), [['Current session', 8], ['Weekly · all models', 61], ['Weekly · Fable', 37], ['Weekly · Opus', 12]]);
+  assert.deepEqual(buckets.map(b => [b.label, b.percent]), [['Current session', 8], ['Weekly · all models', 61], ['Weekly · Fable', 37], ['Weekly · Opus 4.5 · Claude Code', 12]]);
 });
 
 test('normalizeUsage: older accounts without a limits list use flat buckets', () => {
@@ -70,7 +71,7 @@ test('normalizeUsage: unknown credit allowances get a generic label; extra usage
     brass_thimble: { utilization: 0, resets_at: null, limit_dollars: 50, used_dollars: 10 },
     extra_usage: { is_enabled: true, used_credits: 1234, monthly_limit: 5000, currency: 'USD' },
   });
-  assert.deepEqual(credits.map(c => [c.label, c.remaining, c.percent]), [['Included credit', 40, 20]]);
+  assert.deepEqual(credits.map(c => [c.label, c.remaining, c.percentLeft]), [['Included credit', 40, 80]]);
   assert.deepEqual(extra, { enabled: true, used: 12.34, limit: 50, currency: 'USD' });
   assert.equal(lib.normalizeUsage({ extra_usage: { used_credits: 10, monthly_limit: 0 } }).extra, null);
 });
@@ -180,4 +181,23 @@ test('normalizeUsage / updatePace ignore prototype-polluting keys', () => {
   const samples = Object.create(null);
   lib.updatePace(samples, buckets);
   assert.equal(Object.getPrototypeOf({}).utilization, undefined);
+});
+
+test('credits: null/odd dollar fields, overage, expiry, non-credit objects, row cap', () => {
+  const later = iso(86400e3);
+  const { credits } = lib.normalizeUsage({
+    a: { limit_dollars: 250, used_dollars: 40, remaining_dollars: null, resets_at: later },  // remaining computed
+    b: { limit_dollars: 100, used_dollars: 150, resets_at: later },                         // overage -> 0 left
+    c: { limit_dollars: 100, used_dollars: -5, resets_at: later },                          // negative used -> full
+    d: { limit_dollars: 100, used_dollars: 0, resets_at: iso(-3600e3) },                     // expired -> hidden
+    spend: { limit_dollars: 20, used_dollars: 0 },                                           // not an allowance
+    e: { limit_dollars: 50 },                                                                // no used/remaining keys
+    f: { limit_dollars: 1, used_dollars: 0 }, g: { limit_dollars: 1, used_dollars: 0 },      // over the 4-row cap
+  });
+  assert.deepEqual(credits.map(c => [c.key, c.remaining]), [['a', 210], ['b', 0], ['c', 100], ['f', 1]]);
+});
+
+test('usage credits: junk numbers and currency are rejected', () => {
+  assert.equal(lib.normalizeUsage({ extra_usage: { is_enabled: true, used_credits: 'abc', monthly_limit: 100 } }).extra, null);
+  assert.equal(lib.normalizeUsage({ extra_usage: { is_enabled: true, used_credits: 5, monthly_limit: 100, currency: '<b>' } }).extra.currency, 'USD');
 });

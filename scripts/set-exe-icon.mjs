@@ -1,4 +1,5 @@
-// Sets the Windows exe's icon and version info after electron-builder runs.
+// Post-build step: sets the Windows exe's icon and version info, and writes
+// the auto-update config, after electron-builder packs the app folder.
 // Usage: node scripts/set-exe-icon.mjs [path/to/exe]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,3 +35,15 @@ vi.outputToResourceEntries(res.entries);
 res.outputResource(exe);
 fs.writeFileSync(exePath, Buffer.from(exe.generate()));
 console.log(`Set icon and version ${pkg.version} on ${path.basename(exePath)}`);
+
+// Update config for electron-updater (electron-builder only writes this for
+// installer targets; writing it here keeps the verified folder complete).
+const pub = [].concat(pkg.build.publish || [])[0];
+if (pub && pub.provider === 'github') {
+  const yml = [
+    `owner: ${pub.owner}`, `repo: ${pub.repo}`, 'provider: github',
+    `releaseType: ${pub.releaseType || 'release'}`, `updaterCacheDirName: ${pkg.name}-updater`, '',
+  ].join('\n');
+  fs.writeFileSync(path.join(path.dirname(exePath), 'resources', 'app-update.yml'), yml);
+  console.log('Wrote resources/app-update.yml');
+}

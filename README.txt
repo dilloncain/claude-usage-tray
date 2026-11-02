@@ -1,4 +1,4 @@
-CLAUDE USAGE TRAY  -  v1.0.1
+CLAUDE USAGE TRAY  -  v1.1.0
 ============================
 
 Shows how much of your Claude plan you've used: the 5-hour session limit,
@@ -12,15 +12,21 @@ in with their own account on their own PC.
 
 SETUP (about a minute)
 ----------------------
-1. Right-click the zip > "Extract All..." and put the folder somewhere it can
-   stay, for example  C:\Users\<you>\Apps\ClaudeUsageTray
-   (Don't run it from inside the zip.)
-2. Open the folder and double-click  "Claude Usage Tray.exe".
+INSTALLER (recommended)
+1. Run  ClaudeUsageTray-Setup-1.1.0.exe
    - If Windows SmartScreen says "Windows protected your PC", click
      "More info" > "Run anyway". (The app isn't code-signed, that's all.)
-3. A "Sign in to Claude" window opens. Sign in the same way you do on
-   claude.ai (email code, Google, or Apple).
-4. The window closes by itself and the widget appears in the bottom-right.
+2. It installs just for you (no admin needed), adds shortcuts, and starts.
+3. Sign in to Claude in the window that opens (email code, Google or
+   Apple). The window closes by itself and the widget appears.
+Updates install automatically. Turn this off in the tray menu under
+Settings > Install updates automatically.
+
+PORTABLE ZIP (this folder, if you unzipped it)
+1. Keep the folder somewhere it can stay, for example
+   C:\Users\<you>\Apps\ClaudeUsageTray. (Don't run it from inside the zip.)
+2. Double-click  "Claude Usage Tray.exe"  and sign in.
+The zip copy doesn't update itself: download a new zip to update.
 
 Tip: the tray icon may be hidden behind the "^" arrow next to the clock.
 Drag it onto the taskbar to keep it visible.
@@ -74,8 +80,10 @@ NOTES
   percentages, the same as claude.ai's usage page.
 - This is an unofficial tool, not made by Anthropic. It reads an internal
   claude.ai endpoint, so a future claude.ai change could break it.
-- Uninstall: quit from the tray menu, turn off "Start with Windows" first if
-  you enabled it, then delete the folder and  %APPDATA%\Claude Usage Tray
+- Uninstall (installer): Windows Settings > Apps > Claude Usage Tray >
+  Uninstall.  Uninstall (zip): turn off "Start with Windows", quit from the
+  tray menu, delete the folder.  Settings and sign-in live in
+  %APPDATA%\Claude Usage Tray; delete it too to remove everything.
 
 
 SUPPORT
